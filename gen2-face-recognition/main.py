@@ -1,5 +1,7 @@
 # coding=utf-8
 import os
+import time
+import csv
 import argparse
 import blobconverter
 import cv2
@@ -190,9 +192,17 @@ arc_xout = pipeline.create(dai.node.XLinkOut)
 arc_xout.setStreamName('recognition')
 face_rec_nn.out.link(arc_xout.input)
 
-faces_dict = dict()
-identity1 = 0
-with dai.Device(pipeline) as device:
+results = "result"
+if not os.path.exists(results):
+    os.mkdir(results)
+
+with dai.Device(pipeline) as device, open('result/dataset.csv', 'w') as dataset_file:
+    dataset = csv.DictWriter(
+        dataset_file,
+        ["timestamp", "label"]
+    )
+    dataset.writeheader()
+
     facerec = FaceRecognition(databases, args.name)
     sync = TwoStageHostSeqSync()
     text = TextHelper()
@@ -203,6 +213,7 @@ with dai.Device(pipeline) as device:
         queues[name] = device.getOutputQueue(name)
 
     while True:
+        timestamp = int(time.time() * 10000)
         for name, q in queues.items():
             # Add all msgs (color frames, object detections and face recognitions) to the Sync class.
             if q.has():
@@ -219,18 +230,19 @@ with dai.Device(pipeline) as device:
 
                 features = np.array(msgs["recognition"][i].getFirstLayerFp16())
                 conf, name = facerec.new_recognition(features)
-                if conf >= 0.5:
-                    if identity1 ==0:
-                        faces_dict[name] = [name]
-                    identity1 = 1
+                if conf >= 0.8:
+                    data = {
+                        "timestamp": timestamp,
+                        "label": name}
+                    dataset.writerow(data)
                 # TODO: if conf>=0.8 then save name and the timestamp as json on a database and please overwrite it till the new content appears
                 text.putText(frame, f"{name} {(100*conf):.0f}%", (bbox[0] + 10,bbox[1] + 35))
 
             cv2.imshow("color", cv2.resize(frame, (800,800)))
 
         if cv2.waitKey(1) == ord('q'):
-            identified_faces = pd.DataFrame.from_dict(faces_dict)
-            identified_faces.to_csv("identified_names.csv")
             break
 
 
+    if KeyboardInterrupt:
+        pass
